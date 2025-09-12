@@ -16,7 +16,7 @@ You can install the development version of cellustering from
 
 ``` r
 # install.packages("devtools")
-devtools::install_github("langshangyuan/cellustering")
+devtools::install_github("JoshuaRZC/cellustering")
 ```
 
 ## Example
@@ -85,7 +85,6 @@ pbmc <- qc_filter(pbmc,
 )
 pbmc <- normalize(pbmc, scale_factor = 1e6, log_transformation = TRUE)
 pbmc <- find_HVG(pbmc, n_feature = 2000, loess_span = 0.5)
-#> Warning in sqrt(predicted_vars): NaNs produced
 pbmc <- scale_data(pbmc)
 pbmc <- principal_component_analysis(pbmc, PC1 = 3, PC2 = 4)
 ```
