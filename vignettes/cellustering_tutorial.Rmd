@@ -1,0 +1,526 @@
+---
+title: "Cellustering Guided Tutorial"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Cellustering Guided Tutorial}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+This vignette offers you a guided tutorial on using `Cellustering`, a toolkit designed for the preprocessing and clustering analysis of single-cell RNA sequencing (scRNA-seq) data. In this tutorial, we will demonstrate the usage of our package through a streamlined cell-clustering analysis of a Peripheral Blood Mono-nuclear Cells (PBMC) 10X Genomics dataset. We will also illuminate the principles behind methodologies used in our package, and underscore the distinctive advantages that set `Cellustering` apart from previous solutions in the field.
+
+```{r setup, message=FALSE}
+library(cellustering)
+```
+
+# Data Loading
+
+We start by reading in the scRNA-seq data.
+
+## `read_10x()`: Create `Cellustering` instance from 10X Genomics data
+
+`read_10x()` function reads in the data from a file directory containing the outputs of the [Cell Ranger](https://support.10xgenomics.com/single-cell-gene-expression/software/pipelines/latest/what-is-cell-ranger) pipeline from 10X. Notice that the file format is required to be the [Market Exchange Format (MEX)](https://www.10xgenomics.com/cn/support/software/cell-ranger/latest/analysis/outputs/cr-outputs-mex-matrices). `read_10x()` combines the data in these files and generates a [UMI](https://www.illumina.com/techniques/sequencing/ngs-library-prep/multiplexing/unique-molecular-identifiers.html) count matrix. A `Cellustering` instance with count matrix stored in the `data` slot will be automatically created and returned.
+
+```{r read_10x}
+# pbmc <- read_10x("/Users/ren/Documents/hg19")
+# You can read in the data using directory like above
+# Here we directly read in the data attached in our package like below
+pbmc <- read_10x(cellustering_example("hg19"))
+pbmc@data[c("CD3D", "TCL1A", "MS4A1"), 1:4]
+```
+
+### Advantages of `Cellustering` over others
+
+As the pivotal tool within the realm of scRNA-seq data analysis, Cell Ranger standardizes its output in the MEX format. `Cellustering` can directly read in the data in this format, eliminating the need for manual data conversion steps required by other packages such as `SC3` and `TSCAN`.
+
+### Connection to course materials
+
++ Testing: `read_10x()` checks whether user inputs a valid directory containing files in the MEX format.
++ Data structures: `read_10x()` manipulates data structures like matrix and data frame.
++ Data loading: `read_10x()` reads in the data through a directory.
+
+## `Cellustering` class
+
+In `Cellustering` package, every function operates on an instance of the `Cellustering` class. All data and plots produced during the analysis process are stored in the corresponding slots of this instance. The `Cellustering` class containing the following slots:
+
++ data: Stores a data frame containing the UMI count matrix. Functions in the subsequent steps will access and may overwrite this data frame.
++ quality: Stores the data and plots produced during the quality control steps.
++ HVG: Stores the names and plots of genes selected during the feature selection step.
++ reduced_dimension: Stores the data and plots produced during the dimension reduction step.
++ clustering: Stores the data and plots produced during the clustering step.
++ progress: Stores the progress of the whole analysis process.
+
+The slots of an `Cellustering` instance can be accessed through the `@` operator.
+
+## `pbmc` data
+
+The `pbmc` data is stored in a UMI count matrix with dimension 32738 $\times$ 2700. The values in this matrix represent the count of molecules for each gene (i.e. feature; row) that are detected in each cell (i.e. cellular barcode; column). The raw data can be found [here](https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz).
+
+```{r pbmc_data}
+dim(pbmc@data)
+```
+
+# Quality Control
+
+Before analysing the single-cell gene expression data, we must ensure that all cellular barcodes correspond to viable cells, and all genes do express in some cells. Therefore, the quality control (QC) is needed.
+
+Cell QC is commonly performed based on three QC covariates: the number of counts per cell (count depth), the number of genes per cell (feature counts), and the fraction of counts from mitochondrial genes per cell (mitochondrial percent) ([Ilicic et al, 2016](https://link.springer.com/article/10.1186/s13059-016-0888-1); [Griffiths et al, 2018](https://www.embopress.org/doi/full/10.15252/msb.20178046)). The outlier cells in these covariates can correspond to dying cells, cells whose membranes are broken, or doublets, thus awaiting to be filtered out.
+
++ Indicators of dying cells and cells whose membranes are broken:
+  * Low count depth.
+  * Few detected genes.
+  * High fraction of mitochondrial counts.
++ Indicators of doublets:
+  * High count depth.
+  * High detected genes.
+
+According to [Luecken and Theis (2019)](https://www.embopress.org/doi/full/10.15252/msb.20188746), considering any of these three cell QC covariates in isolation can lead to misinterpretation of cellular signals. For example, cells with a comparatively high fraction of mitochondrial counts may be involved in respiratory processes. Thus, cell QC covariates should be considered jointly when univariate thresholding decisions are made.
+
+Gene QC is commonly performed based on the number of counts per gene (total expression) and the number of cells per gene (cell counts). Genes with low values in these two covariates need to be filtered out.
+
+## `qc_plot()`: Create plots to facilitate quality control
+
+To help determine the thresholds for cell QC, two plots are created. The first plot contains the distributions of three cell QC covariates and their joint scatter. The second plot contains three vilon plots regarding these covariats.
+
+To help determine the thresholds for gene QC, one plot containing the truncated (x-axis value < 25) distributions of two gene QC covariates is generated.
+
+All relevant statistics and plots are added to the `quality` slot of the `Cellustering` instance. `qc_plot()` automatically shows the first plot for cell QC and returns the `Cellustering` instance.
+
+```{r qc_plot, fig.width=8, fig.height=6}
+pbmc <- qc_plot(pbmc)
+head(pbmc@quality$cell)
+head(pbmc@quality$feature)
+pbmc@quality$cell_plot
+pbmc@quality$violin_plot
+pbmc@quality$feature_plot
+```
+
+### Advantages of `Cellustering` over others
+
+For packages like `SC3` and `TSCAN`, they don't have built-in functions for QC.
+
+For packages like `Seurat`, they have built-in functions to plot QC covariates, but
+
++ The fraction of mitochondrial counts needs to be manually computed.
++ The cell QC covariates are isolatedly plotted.
++ Lacking a function to integrate different kinds of plots.
++ Lacking plots for gene QC covariates.
+
+### Connection to course materials
+
++ Testing: `qc_plot()` checks whether user inputs a `Cellustering` instance.
++ Data frame manipulation: `qc_plot()` conducts column sum, row sum, and ranking over the data frame.
++ ggplot2: `qc_plot()` uses `ggplot2` package to plot.
++ Regular expression: `qc_plot()` uses regular expression and text manipulation to search for mitochondrial genes.
+
+## `qc_filter()`: Filter out low-quality cells and genes
+
+According to the plots created by `qc_plot()`, we can set conditions over the QC covariates to filter out low-quality cells and genes. `qc_filter()` will do the filtering and return the `Cellustering` instance.
+
+In the example here, we only retain cells and genes satisfying the following conditions:
+
++ The number of genes per cell (feature counts) > 200 & < 2500.
++ The fraction of counts from mitochondrial genes per cell (mitochondrial percent) < 5%.
++ The number of cells per gene (cell counts) > 3.
+
+```{r qc_filter}
+pbmc <- qc_filter(pbmc,
+  min_feature = 200,
+  max_feature = 2500,
+  max_mito_percent = 5,
+  min_cell = 3
+)
+```
+
+We can check the dimension of the count matrix and QC plots again:
+
+```{r recheck_and_replot, fig.width=8, fig.height=6}
+dim(pbmc@data)
+pbmc <- qc_plot(pbmc)
+pbmc@quality$violin_plot
+```
+
+We can see that 19024 cells and 74 genes are filtered out.
+
+### Advantages of `Cellustering` over others
+
+For packages like `Seurat`, they don't have built-in functions for filtering, user has to manually filter out genes and cells.
+
+### Connection to course materials
+
++ Testing: `qc_filter()` checks whether user input has correct data type and appropriate value.
++ Indexing: `qc_filter()` uses indexing with booleans on-the-fly to achieve the filtering.
+
+
+# Data normalization
+
+Due to the variations in total count depths among different cells, the magnitudes of gene expression counts of two cells may not be on a comparable scale. To remove the effect of count depth, we need to conduct cell-level normalization.
+
+The most commonly used normalization protocol is count depth scaling, also referred to as Counts Per Million” or CPM normalization [(Luecken & Theis, 2019)](https://www.embopress.org/doi/full/10.15252/msb.20188746). It scales the expression counts of different cells and unifies their count depths to 1e6. Variations of this method set the scale factors to be different factors of 10.
+
+After normalization, the count matrix is typically log(x+1)-transformed. This transformation has three important effects:
+
++ Distances between log-transformed expression values represent log fold changes, which are the canonical way to measure changes in expression.
++ Log transformation mitigates (but does not remove) the mean–variance relationship in single-cell data [(Brennecke et al, 2013)](https://www.huber.embl.de/pub/pdf/Brennecke2013.pdf).
++ Log transformation reduces the skewness of the data to approximate the assumption of many downstream analysis tools that the data are normally distributed.
+
+## `normalize()`: Conduct cell-level normalization
+
+The `normalize()` function allows us to normalize the count matrix with CPM protocol and its variation. We can also control whether to apply log(x+1) transformation by setting the `log_transformation` parameter. The count matrix in the `data` slot is overwritten by its normalized version. And the `Cellustering` instance is returned by the `normalize` function.
+
+```{r normalize}
+pbmc <- normalize(pbmc, scale_factor = 1e6, log_transformation = TRUE)
+```
+
+### Advantages of `Cellustering` over others
+
+Compared to other packages like `Seurat`, the variations of CPM are also employed by `Cellustering`.  User is able to tune the scale factor since its value may impact the analysis in the presence of technical dropout effects.
+
+### Connection to course materials
+
++ Testing: `normalize()` checks whether user input has correct data type and appropriate value.
++ Dplyr: `normalize()` uses `Dplyr` to achieve CPM and its variations.
+
+# Feature Selection
+
+A human single-cell RNA-seq dataset can have over 15,000 dimensions even after filtering out these low-count genes in the QC step. Many of these genes will not be informative for the clustering task. To ease the computational burden on downstream analysis, we consider keeping only genes that are “informative” of the variability in the data. According to [Brennecke et al (2013)](https://www.huber.embl.de/pub/pdf/Brennecke2013.pdf), highly variable genes (HVGs) can effectively preserve the data variability. Typically, between 1,000 and 5,000 HVGs are selected for downstream analysis.
+
+## `find_HVG()`: Identify, visualize, and keep HVGs
+
+The `find_HVG()` function allows us to select HVGs through the variance stabilizing transformation (VST) algorithm. The algorithm takes the following steps:
+
+1. The sample mean and sample variance of the expression counts for each gene are calculated.
+2. A local polynomial regression model is fitted over the means and variances.
+3. Predict each gene's sample variance using the fitted model and sample mean.
+4. Standardize the count matrix using sample means and predicted variances.
+5. Clipping the standardized values if it's too large.
+6. Recompute the sample variance of the expression counts for each gene.
+7. Rank the recomputed sample variances and select HVGs.
+
+We can control the smoothness of the local polynomial regression model by tuning the `loess_span` parameter. The HVGs' names and relevant plots are stored in the `HVG` slot. The `Cellustering` instance is returned by the `normalize()` function.
+
+```{r find_HVG, fig.width=8, fig.height=6}
+pbmc <- find_HVG(pbmc, n_feature = 2000, loess_span = 0.5)
+pbmc@HVG$HVG_plot
+```
+
+### Advantages of `Cellustering` over others
+
+For packages like `Seurat`, they employ a binning method in the analysis to increase the accuracy at the cost of computing time. However, preliminary results from [Klein et al (2015)](https://www.cell.com/cell/pdf/S0092-8674(15)00500-0.pdf) suggest that downstream analysis is robust to the exact choice of the number of HVGs. While varying the number of HVGs, the authors reported similar low-dimensional representations in the PCA space, meaning selecting a small number of HVGs with high accuracy can be substituted by selecting more HVGs with lower accuracy. Based on that, `Cellustering` dispenses with the binning method and increases the speed of the algorithm.
+
+### Connection to course materials
+
++ Testing: `find_HVG()` checks whether the count matrix has gone through the normalization step and whether user input has correct data type and appropriate value.
++ Apply: `find_HVG()` uses `apply()` to compute the sample means and sample variances of gene expressions.
++ Model fitting: `find_HVG()` fits a local polynomial regression model (by calling `loess()`) and make predictions on data.
++ ggplot2: `find_HVG()` uses `ggplot2` package to plot.
+
+
+# Dimension Reduction
+
+After feature selection, the dimensions of count matrix can be further reduced by dimension reduction algorithms, which capture the underlying structure in the data in a low-dimensional space. The two main objectives of dimension reduction are visualization and summarization.
+
++ Visualization: Optimally describes the count matrix in two or three dimensions. The dimensions reduced to are used as coordinates for scatter plot to obtain a visual representation of the count matrix.
++ Summarization: The number of output components is larger than two or three. It aims to reduce the count matrix to its essential components and find the inherent structure of the data.
+
+`Cellustering` employs Principal Component Analysis (PCA) [(Pearson, 1901)](https://www.tandfonline.com/doi/pdf/10.1080/14786440109462720), a dimension reduction technique that fulfills the above two objectives.
+
+**Principle of PCA:**
+
+*Suppose the input is a dataset $D=\left\{\textbf{x}^{(1)}, \dots, \textbf{x}^{(N)}\right\} \subset \mathbb{R}^{D}$, with $D$ being the original dimension. Our goal is to find a $K$-dimensional $(K<D)$ subspace $\mathbb{S}$, which consists of $K$ orthonormal basis vectors $\left\{\textbf{u}_{k}\right\}_{k=1}^{K}$. When projecting all points in $\mathbb{R}^{D}$ onto $\mathbb{S}$, it is desired that the structure or property of the original data is well preserved.*
+
+*Therefore, we set the objective as maximizing the variance of the reconstructions $\tilde{D}=\left\{\tilde{\mathbf{x}}^{(1)}, \dots, \tilde{\mathbf{x}}^{(n)}\right\}$ (We can easily show that this objective is equivalent to minimizing the reconstruction loss using Pythagoras Theorem):*
+
+$$
+\max _{U, U^{T} U=I} \frac{1}{N} \sum_{i=1}^{N}\left\|\tilde{\textbf{x}}^{(n)}-\tilde{\boldsymbol{\mu}}\right\|^{2}
+$$
+
+*where $\tilde{\boldsymbol{\mu}}=\frac{1}{N} \sum_{i=1}^{N} \tilde{\textbf{x}}^{(n)}$ is the mean of the reconstructions.*
+
+*Notice that the objective function doesn't contain the decision variable $U$, therefore, we need to further process the objective function.*
+
+*According to the definition of $\tilde{\textbf{x}}$ and $\mathbf{z}^{(n)}$, we have:*
+
+$$
+\begin{array} {r l l}
+\tilde{\boldsymbol{\mu}} &=& \frac{1}{N} \sum_{i=1}^{N} \tilde{\textbf{x}}^{(n)} \\
+&=&\frac{1}{N} \sum_{i=1}^{N}\left(\boldsymbol{\mu}+U \mathbf{z}^{(n)}\right) \\
+&=&\boldsymbol{\mu}+\frac{U}{N} \sum_{i=1}^{N}\left(U^{T}\left(\textbf{x}^{(n)}-\boldsymbol{\mu}\right)\right) \\
+&=&\boldsymbol{\mu}
+\end{array}
+$$
+
+*Therefore, the objective function can be converted into:*
+
+$$
+\begin{array} {r l l}
+\frac{1}{N} \sum_{i=1}^{N}\left\|\tilde{\textbf{x}}^{(n)}-\tilde{\boldsymbol{\mu}}\right\|^{2} &=& \frac{1}{N} \sum_{i=1}^{N}\left\|\boldsymbol{\mu}+U \mathbf{z}^{(n)}-\boldsymbol{\mu}\right\|^{2} \\
+&=& \frac{1}{N} \sum_{i=1}^{N}\left\|\mathbf{z}^{(n)}\right\|^{2}
+\end{array}
+$$
+
+*Utilizing the definition of $\mathbf{z}^{(n)}$, we have:*
+
+$$
+\begin{array} {r l l}
+\max _{U, U^{T} U=I} \frac{1}{N} \sum_{i=1}^{N}\left\|\tilde{\textbf{x}}^{(n)}-\tilde{\boldsymbol{\mu}}\right\|^{2}
+&\Leftrightarrow& \max _{U, U^{T} U=I} \frac{1}{N} \sum_{i=1}^{N}\left\|\mathbf{z}^{(n)}\right\|^{2} \\
+&\Leftrightarrow& \max _{U, U^{T} U=I} \frac{1}{N} \sum_{i=1}^{N}\left\|U^{T}\left(\textbf{x}^{(n)}-\boldsymbol{\mu}\right)\right\|^{2} \\
+&\Leftrightarrow& \max _{U, U^{T} U=I} \frac{1}{N} \sum_{i=1}^{N} \operatorname{Trace}\left(U^{T}\left(\textbf{x}^{(n)}-\boldsymbol{\mu}\right)\left(\textbf{x}^{(n)}-\boldsymbol{\mu}\right)^{T} U\right)
+\end{array}
+$$
+
+*To solve this problem, we define the empirical covariance matrix as:*
+
+$$
+\Sigma=\frac{1}{N} \sum_{i=1}^{N}\left(\textbf{x}^{(n)}-\boldsymbol{\mu}\right)\left(\textbf{x}^{(n)}-\boldsymbol{\mu}\right)^{T}
+$$
+
+*Then the optimization problem becomes:*
+
+$$
+\max _{U, U^{T} U=I} \frac{1}{N} \sum_{i=1}^{N} \operatorname{Trace}\left(U^{T} \Sigma U\right)=\sum_{k=1}^{K} \textbf{u}_{k}^{T} \Sigma \textbf{u}_{k}
+$$
+
+*The Lagrangian function is:*
+
+$$
+L\left(U, \Lambda_{k}\right)=\operatorname{Trace}\left(U^{T} \Sigma U\right)+\operatorname{Trace}\left(\Lambda_{K}^{T}\left(I-U^{T} U\right)\right)
+$$
+
+*where $\Lambda_{K}=\operatorname{diag}\left(\hat{\lambda}_{1}, \ldots \ldots, \hat{\lambda}_{k}\right) \in \mathbb{R}^{K \times K}$.*
+
+*The optimal solution satisfies:*
+
+$$
+\frac{\partial L\left(U, \Lambda_{k}\right)}{\partial U}=2 \Sigma U-2 U \Lambda_{K}=0
+$$
+
+*which is equivalent to $\Sigma \textbf{u}_{k}=\hat{\lambda}_{k} \textbf{u}_{k},~ k=1, \dots, K$.*
+
+*Therefore, the primal optimal solution $\textbf{u}_{k}$ and the dual optimal solution $\hat{\lambda}_{k}$ are a pair of eigenvector and eigenvalue of $\Sigma$. And they satisfy $U^{T} U=I$.*
+
+*By SVD decomposition, we have:*
+
+$$
+\Sigma=Q \Lambda_{D} Q^{T}=\sum_{i=1}^{D} \lambda_{i} \textbf{q}_{i} \textbf{q}_{i}^{T}
+$$
+
+*- $Q=\left[\textbf{q}_{1}, \ldots \ldots, \textbf{q}_{D}\right] \in \mathbb{R}^{D \times D}$, $\textbf{q}_{i}$ corresponds to the i-th largest eigenvalue $\lambda_{i}$.*
+
+*- $\Lambda_{D}=\operatorname{diag}\left(\lambda_{1}, \ldots \ldots, \lambda_{D}\right) \in \mathbb{R}^{D \times D}$, and $\lambda_{1} \geq \cdots \geq \lambda_{D}$.*
+
+*Plug into the objective function, we have:*
+
+$$
+\begin{array} {r l l}
+\sum_{k=1}^{K} \textbf{u}_{k}{ }^{T} \Sigma \textbf{u}_{k} &=& \sum_{k=1}^{K} \textbf{u}_{k}{ }^{T}\left(\sum_{i=1}^{D} \lambda_{i} \textbf{q}_{i} \textbf{q}_{i}{ }^{T}\right) \textbf{u}_{k} \\
+&=& \sum_{k=1}^{K} \sum_{i=1}^{D} \lambda_{i}\left(\textbf{u}_{k}{ }^{T} \textbf{q}_{i}\right)\left(\textbf{q}_{i}{ }^{T} \textbf{u}_{k}\right)\\
+&=&\sum_{t \in T} \lambda_{t}
+\end{array}
+$$
+
+*where $T \subset\{1, \dots, D\}$ and $|T|=K$.*
+
+*Therefore, in order to maximize the objective function, we need to pick the top-$K$ eigenvalues and their corresponding eigenvectors. As a result, we pick the top-$K$ columns of $Q$ to form $U$.*
+
+## `scale_data()`: Scale and center the selected features
+
+From the above derivation, we can see that PCA applies eigenvalue decomposition on a empirical covariance matrix. Therefore, `Cellustering` provides us the `scale_data()` function, which scales each HVG's expression counts to have mean 0 and variance 1, thus preparing for the subsequent PCA transformation.
+
+`scale_data()` indexes the HVGs in the `data` slot with their names, stores the scaled HVG counts matrix in the `reduced_dimension` slot, and returns the `Cellustering` instance.
+
+```{r scale_data}
+pbmc <- scale_data(pbmc)
+pbmc@reduced_dimension$scaled_data[1:5, 1:4]
+
+# Check if the row sums equal to 0
+row_sums <- rowSums(pbmc@reduced_dimension$scaled_data)
+all.equal(row_sums, rep(0, 2000), check.attributes = FALSE)
+
+# Check if the row sd equal to 1
+row_sds <- apply(pbmc@reduced_dimension$scaled_data, 1, sd)
+all.equal(row_sds, rep(1, 2000), check.attributes = FALSE)
+```
+
+### Connection to course materials
+
++ Testing: `scale_data()` checks whether user inputs a `Cellustering` instance.
++ Apply: `scale_data()` uses `apply()` to compute the standard deviation for each gene.
++ Indexing: `scale_data()` uses indexing with name to select HVG data.
+
+## `principal_component_analysis()`: Apply PCA on data
+
+From the above derivation, we can see the remarkable relationship between PCA and eigenvalue decomposition (or singular value decomposition). Therefore, the `principal_component_analysis()` function is provided to compute the eigenvalues and eigenvectors of the covariance matrix.
+
+We can specify the two principal components (PCs) to visualize. A two-dimensional visualization of HVG count matrix is automatically outputed by `principal_component_analysis()`. This function stores all the relevant data and plots in the `reduced_dimension` slot, and returns the `Cellustering` instance.
+
+```{r principal_component_analysis, fig.width=8, fig.height=6}
+pbmc <- principal_component_analysis(pbmc, PC1 = 3, PC2 = 4)
+```
+
+### Connection to course materials
+
++ Testing: `principal_component_analysis()` checks whether the HVG count matrix has gone through the scaling step and whether user input has correct data type and appropriate value.
++ ggplot2: `principal_component_analysis()` uses `ggplot2` package to plot.
+
+## `select_proper_dimension`: Select dimensions for summarization
+
+As mentioned before, we would like to pick out the essential PCs (say, $PC~1$ to $PC~L$) of HVG count matrix and embed the data into this low-dimension space for the subsequent clustering analysis. To determine the value of $L$, `Cellustering` produces [scree plot and profile log-likelihood plot](https://bjpcjp.github.io/pdfs/math/latent-linear-models-MLP.pdf) to facilitate and automatically picks the optimized $L$.
+
+**Scree plot**
+
+From the above derivation for PCA, we can easily show that the reconstruction error $E(D, L)={\frac{1}{|D|}}\sum_{i\in D}||\mathbf{x}_{i}-\mathbf{\tilde{x}}_{i}||^{2}$ is equivalent to $\sum_{k=L+1}^{D}\lambda_k$. Therefore, we can plot $\sum_{k=L+1}^{D}\lambda_k \quad vs \quad L$ and figure out the "regime change" (from relatively large errors to relatively small).
+
+**Profile log-likelihood plot**
+
+Since the scree plot is monotone, we cannot automate the detection of $L$ by directly picking the minimal or maximal. One way to solve this is to use the profile log-likelihood plot.
+
++ Consider partitioning the eigenvalues $\lambda_{1}\geq\lambda_{2}\geq\cdot\cdot\cdot\cdot\geq\lambda_{L_{m a x}}$ into two groups, depending on whether $k < L$ or $k > L$, where $L$ is some threshold which we will determine.
++ To measure the quality of L, we assume a simple change-point model, where $\lambda_{k}\sim\mathcal{N}({\mu }_{1},\sigma^{2})$ if $k \leq L$, and $\lambda_{k}\sim\mathcal{N}({\mu}_{2},\sigma^{2})$ if $k > L$. within each regimes, assume the $\lambda_k$ are iid.
++ For each $L = 1:L_{max}$, evaluate the profile log likelihood:
+$$
+\begin{array}{r c l}
+{{\mu_{1}(L)}}&{{=}}&{{\displaystyle\frac{\sum_{k\le L}\lambda_{k}}{L},~\mu_{2}(L)=\frac{\sum_{k> L}\lambda_{k}}{N-L}}}\\ {{}}&{{}}&{{}}\\ {{\sigma^{2}(L)}}&{{=}}&{{\displaystyle\frac{\sum_{k\le L}(\lambda_{k}-\mu_{1}(L))^{2}+\sum_{k>L}(\lambda_{k}-\mu_{2}(L))^{2}}{N}}}\\
+\ell(L) &=& \sum_{k=1}^{L}\log{\cal N}(\lambda_{k}|\mu_{1}(L),\sigma^{2}(L))+\sum_{k=L+1}^{K}\log{\cal N}(\lambda_{k}|\mu_{2}(L),\sigma^{2}(L))
+\end{array}
+$$
++ Choose $L^* = arg~max~\ell(L)$.
+
+The `select_proper_dimension()` function provides us the above to plots and suggests a dimension ($L$) to reduce to. The relevant data and plots are stored in the `reduced_dimension` slot, and the `Cellustering` instance is returned.
+
+```{r select_proper_dimension, fig.width=8, fig.height=6}
+pbmc <- select_proper_dimension(pbmc)
+```
+
+### Advantages of `Cellustering` over others
+
+For packages like `SC3` and `TSCAN`, they don't have a function to facilitate the selection of the dimension.
+
+For packages like `Seurat`, they produces elbow plot (which functions just like scree plot), heatmap plot and others for facilitation. However, no automatic selection method is applied in these packages.
+
+For packages like `SC3`, they employ the consensus clustering strategy [(Kiselev et al, 2016)](https://www.nature.com/articles/nmeth.4236) to analyze different choices of $L$. However, this procedure may take hours, and the clustering accuracy for large dataset is diminished since it cannot cluster all the cells at one time.
+
+### Connection to course materials
+
++ Testing: `select_proper_dimension()` checks whether the count matrix has gone through the PCA step and whether user inputs a `Cellustering` instance.
++ Vectorized computation: `select_proper_dimension()` employs vectorized computation in the production of the profile log-likelihood plot.
+
+# Cluster Analysis
+
+Organizing cells into clusters is pivotal in single-cell analysis. Clusters are obtained by grouping cells based on the similarity of their gene expression profiles (the dimension-reduced version).
+
+`Cellustering` uses the popular k-means clustering algorithm. This algorithm divides cells into k clusters by determining cluster centroids and assigning cells to the nearest cluster centroid. Centroid positions are iteratively optimized (MacQueen, 1967).
+
+**Principle of k-means clustering:**
+
+*Given the dataset $\left\{\textbf{x}_{i}\right\}_{i=1}^{n}$, k-means aims to find cluster centers $\textbf{c}=\left\{\textbf{c}_{j}\right\}_{j=1}^{K}$ and assgnments $\mathbf{r}$, by minimizing the sum of squared distances of the data points to their assigned cluster centers. In short, K-means will minimize the within-cluster variance, as follows:*
+
+$$
+\begin{array}{ll}
+&\min _{\textbf{c}, \textbf{r}} J(\boldsymbol{c}, \boldsymbol{r})=\min _{\boldsymbol{c}, \boldsymbol{r}} \sum_{i}^{n} \sum_{k}^{K} r_{i k}\left(\textbf{x}_{i}-\textbf{c}_{k}\right)^{2} \\
+&\text { Subject to } \quad \textbf{r} \in\{0,1\}^{n * K}, \quad \sum_{k}^{K} r_{i k}=1
+\end{array}
+$$
+*where $r_{i k}=1$ denotes $\textbf{x}_{i}$ is assigned to cluster $k$.*
+
+*The above optimization problem can be solved by coordinate descent algorithm, i.e., update $\textbf{c}$ and $\textbf{r}$ alternatively:*
+
++ *Given the cluster centers $\textbf{c}$, update the assignments $\textbf{r}$*
++ *Given the assignments $\textbf{r}$, update the cluster centers $\textbf{c}$*
+
+*Therefore, the general procedure of the optimization of K-means clustering is:*
+
++ *Initialization: set $K$ cluster centers $\textbf{c}$ to random values*
+
++ *Repeat the following steps until convergence (the assignments don't change):*
+
+  * *Assignment: Given the cluster ceneters $\textbf{c}$, update the assignments $\textbf{r}$ by solving the following sub-problem:*
+
+$$
+\min _{\boldsymbol{r}} \sum_{i}^{n} \sum_{k}^{K} r_{i k}\left(\textbf{x}_{i}-\textbf{c}_{k}\right)^{2}, \text { subject to } \textbf{r} \in\{0,1\}^{n \times K}, \sum_{k}^{K} r_{i k}=1
+$$
+
+  *Note that the assignment for each data $\textbf{x}_{i}$ can be solved independently. i.e.*
+
+$$
+\min _{\boldsymbol{r}} \sum_{k}^{K} r_{i k}\left(\textbf{x}_{i}-\textbf{c}_{k}\right)^{2}, \text { subject to } \textbf{r}_{i} \in\{0,1\}^{1 * K}, \sum_{k}^{K} r_{i k}=1
+$$
+
+  *It is easy to know that assign $\textbf{x}_{i}$ to the closest cluster is the optimal solution.*
+
+$$
+k^{*}=\arg \min \left\{\left(\textbf{x}_{i}-\textbf{c}_{k}\right)^{2}\right\}_{k=1}^{K}, \text { and } \sum_{k}^{K} r_{i k^{*}}=1
+$$
+
+- *Refitting: Given the assignments $\textbf{r}$, update the cluster centers $\textbf{c}$:*
+
+$$
+\min _{\boldsymbol{c}} \sum_{i}^{n} \sum_{k}^{K} r_{i k}\left(\textbf{x}_{i}-\textbf{c}_{k}\right)^{2}
+$$
+
+*Note that $\textbf{c}_{1}, \textbf{c}_{2}, \ldots \ldots, \textbf{c}_{K}$ can be optimized independently, as follows:*
+
+$$
+\min _{c_{k}} \sum_{i}^{n} r_{i k}\left(\textbf{x}_{i}-\textbf{c}_{k}\right)^{2}
+$$
+
+*By setting the derivative w.r.t. $\textbf{c}_{k}$ as 0 , it is easy to obtain the optimal solution:*
+
+$$
+\sum_{i}^{n} 2 r_{i k}\left(\textbf{x}_{i}-\textbf{c}_{k}\right)=0 \Rightarrow \boldsymbol{c}_{k}=\frac{\sum_{i}^{n} r_{i k} \textbf{x}_{i}}{\sum_{i}^{n} r_{i k}}
+$$
+
+*Thus, $\textbf{c}_{k}$ is the center of the $k$-th cluster.*
+
+## `kmeans()`: Apply k-means clustering on data
+
+The `kmeans()` function applies k-means clustering algorithm on the dimension-reduced HVG count matrix. The number of clusters $k$ needs to be specified by us. The `kmeans()` function generates a two-dimensional plot based on the PCA results and clustering results. The relevant clustering information and plots are stored in the `clustering` slot, and the `Cellustering` instance is returned.
+
+```{r kmeans, fig.width=8, fig.height=6}
+pbmc <- kmeans(pbmc, k = 7, dimensions = 4)
+```
+
+### Advantages of `Cellustering` over others
+
+For packages like `Seurat`, they use community detection methods like graph-partitioning algorithms. However, these algorithms cannot specify the exact number of clusters. User can only make rough adjustment on cluster numbers by tuning the `resolution` parameter.
+
+### Connection to course materials
+
++ Testing: `kmeans()` checks whether the count matrix has gone through the PCA step and whether user input has correct data type and appropriate value.
++ ggplot2: `kmeans()` uses `ggplot2` package to plot.
+
+## `compute_silhouette()`: Evaluate the clustering results
+
+`Cellustering` uses Silhouette coefficient to evaluate the clustering results.
+
+Silhouette coefficient for a single sample is formulated as:
+
+$$
+s=\frac{b-a}{\max (a, b)} \Rightarrow s= \begin{cases}1-\frac{a}{b} & \text { if } a<b \\ 0 & \text { if } a=b \\ \frac{b}{a}-1 & \text { if } a>b\end{cases}
+$$
+
+It is easy to know that $s \in(-1,1)$, and larger $s$ value indicates better clustering performance. And the Silhouette coefficient $s$ for a set of samples is defined as the mean of the Silhouette Coefficient for each sample.
+
+The derived Silhouette coefficient is stored in the `clustering` slot and the `Cellustering` instance is returned.
+
+```{r compute_silhouette}
+pbmc <- compute_silhouette(pbmc)
+```
+
+### Advantages of `Cellustering` over others
+
+For packages like `Seurat`, they don't have evaluation matrices for clustering results.
+
+### Connection to course materials
+
++ Testing: `compute_silhouette()` checks whether the count matrix has gone through the k-means step and whether user inputs a `Cellustering` instance.
++ Data frame manipulation: `compute_silhouette()` manipulates over the data frame.
+
