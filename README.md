@@ -6,7 +6,7 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-The cellustering is a toolkit designed for the preprocessing and
+The `cellustering` is a toolkit designed for the preprocessing and
 clustering analysis of single-cell RNA sequencing (scRNA-seq) data.
 
 ## Installation
@@ -41,7 +41,7 @@ pbmc <- qc_plot(pbmc)
 ``` r
 head(pbmc@quality$cell)
 #>                  count_depth feature_count mito_percent
-#> AAACATACAACCAC.1        2421           781     3.097893
+#> AAACATACAACCAC.1        2421           781      3.097893
 #> AAACATTGAGCTAC.1        4903          1352     3.875178
 #> AAACATTGATCAGC.1        3149          1131     1.079708
 #> AAACCGTGCTTCCG.1        2639           960     1.970443
@@ -57,8 +57,6 @@ head(pbmc@quality$feature)
 #> AL627309.1                  9          9
 pbmc@quality$cell_plot
 ```
-
-<img src="man/figures/README-example-2.png" width="100%" />
 
 ``` r
 pbmc@quality$violin_plot
@@ -90,6 +88,14 @@ pbmc <- principal_component_analysis(pbmc, PC1 = 3, PC2 = 4)
 ```
 
 <img src="man/figures/README-cars-1.png" width="100%" />
+
+``` r
+pbmc <- select_proper_dimension(pbmc)
+#> [1] "The suggested dimension to reduce to: 4"
+```
+<img src="man/figures/README-example-5.png" width="100%" />
+
+
 
 ``` r
 pbmc <- kmeans(pbmc, k = 7, dimensions = 4)
